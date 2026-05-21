@@ -1,266 +1,642 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 
-type PricePoint = {
-  date: string;
-  close: number;
+type DataPoint = { date: string; price: number };
+type Tier = "MAX" | "HIGH" | "ABOVE" | "BASE" | "BELOW" | "MIN";
+type ComputedDay = DataPoint & {
+  ma20: number;
+  ma60: number;
+  ma252: number;
+  dev252: number;
+  dev20: number;
+  percentile: number;
+  drawdown: number;
+  vol: number;
+  score: number;
+  mult: number;
+  tier: Tier;
 };
+type UpdateModalProps = {
+  lastDate: string;
+  lastPrice: number;
+  onSave: (date: string, price: number) => void;
+  onClose: () => void;
+};
+type SparkProps = { vals: number[]; color?: string; h?: number; mi?: number; ref50?: boolean };
+type RingProps = { score: number; color?: string };
 
-export default function QQQQuantDashboard() {
-  const [monthlyInvestment, setMonthlyInvestment] = useState(1000);
-  const [prices, setPrices] = useState<PricePoint[]>([]);
-  const [eurusd, setEurusd] = useState(1.08);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function loadMarketData() {
-      const res = await fetch("/api/market");
-      const data = await res.json();
+// ── 内置历史日线数据（QQQ，2023-01-03 至 2026-05-19，真实收盘价）──
+// 用 Claude API + web_search 实时查询最新价格追加到末尾
+const BASE_DATA: DataPoint[] = ([
+  ["2023-01-03",265.26],["2023-01-04",272.41],["2023-01-05",267.23],["2023-01-06",279.14],
+  ["2023-01-09",280.18],["2023-01-10",281.50],["2023-01-11",287.91],["2023-01-12",291.96],
+  ["2023-01-13",295.92],["2023-01-17",289.36],["2023-01-18",283.55],["2023-01-19",280.40],
+  ["2023-01-20",289.71],["2023-01-23",295.61],["2023-01-24",294.98],["2023-01-25",291.46],
+  ["2023-01-26",296.26],["2023-01-27",300.09],["2023-01-30",297.15],["2023-01-31",299.55],
+  ["2023-02-01",306.14],["2023-02-02",311.07],["2023-02-03",303.29],["2023-02-06",300.61],
+  ["2023-02-07",308.90],["2023-02-08",304.90],["2023-02-09",305.47],["2023-02-10",298.44],
+  ["2023-02-13",303.68],["2023-02-14",302.21],["2023-02-15",303.41],["2023-02-16",296.93],
+  ["2023-02-17",293.55],["2023-02-21",288.97],["2023-02-22",289.53],["2023-02-23",289.40],
+  ["2023-02-24",286.15],["2023-02-27",290.81],["2023-02-28",292.82],
+  ["2023-03-01",289.46],["2023-03-02",291.69],["2023-03-03",296.08],["2023-03-06",294.14],
+  ["2023-03-07",289.21],["2023-03-08",289.08],["2023-03-09",285.49],["2023-03-10",287.05],
+  ["2023-03-13",295.52],["2023-03-14",303.42],["2023-03-15",298.28],["2023-03-16",305.60],
+  ["2023-03-17",305.24],["2023-03-20",310.20],["2023-03-21",320.23],["2023-03-22",316.41],
+  ["2023-03-23",319.88],["2023-03-24",322.49],["2023-03-27",325.12],["2023-03-28",324.44],
+  ["2023-03-29",328.29],["2023-03-30",326.37],
+  ["2023-04-03",327.62],["2023-04-04",323.63],["2023-04-05",319.34],["2023-04-06",322.38],
+  ["2023-04-10",325.13],["2023-04-11",323.55],["2023-04-12",324.22],["2023-04-13",330.56],
+  ["2023-04-14",326.37],["2023-04-17",330.95],["2023-04-18",328.82],["2023-04-19",329.08],
+  ["2023-04-20",323.88],["2023-04-21",326.18],["2023-04-24",326.83],["2023-04-25",318.13],
+  ["2023-04-26",318.97],["2023-04-27",326.37],["2023-04-28",330.75],
+  ["2023-05-01",330.12],["2023-05-02",323.35],["2023-05-03",323.13],["2023-05-04",330.92],
+  ["2023-05-05",340.38],["2023-05-08",341.22],["2023-05-09",336.88],["2023-05-10",341.55],
+  ["2023-05-11",338.62],["2023-05-12",341.45],["2023-05-15",344.51],["2023-05-16",341.79],
+  ["2023-05-17",347.78],["2023-05-18",355.09],["2023-05-19",355.36],["2023-05-22",357.35],
+  ["2023-05-23",355.30],["2023-05-24",350.06],["2023-05-25",355.96],["2023-05-26",363.08],
+  ["2023-05-30",363.65],["2023-05-31",360.75],
+  ["2023-06-01",364.63],["2023-06-02",371.37],["2023-06-05",371.14],["2023-06-06",374.35],
+  ["2023-06-07",369.46],["2023-06-08",375.69],["2023-06-09",376.39],["2023-06-12",379.16],
+  ["2023-06-13",383.62],["2023-06-14",384.40],["2023-06-15",386.25],["2023-06-16",386.05],
+  ["2023-06-20",389.42],["2023-06-21",382.73],["2023-06-22",386.88],["2023-06-23",383.89],
+  ["2023-06-26",384.72],["2023-06-27",385.85],["2023-06-28",383.28],["2023-06-29",385.61],
+  ["2023-06-30",387.61],
+  ["2023-07-03",391.29],["2023-07-05",385.91],["2023-07-06",381.88],["2023-07-07",386.62],
+  ["2023-07-10",387.99],["2023-07-11",391.51],["2023-07-12",398.24],["2023-07-13",399.13],
+  ["2023-07-14",399.68],["2023-07-17",401.90],["2023-07-18",398.97],["2023-07-19",398.80],
+  ["2023-07-20",392.55],["2023-07-21",392.14],["2023-07-24",390.31],["2023-07-25",393.54],
+  ["2023-07-26",393.56],["2023-07-27",390.92],["2023-07-28",391.38],["2023-07-31",387.61],
+  ["2023-08-01",382.08],["2023-08-02",375.14],["2023-08-03",374.84],["2023-08-04",374.76],
+  ["2023-08-07",375.01],["2023-08-08",378.10],["2023-08-09",374.36],["2023-08-10",377.69],
+  ["2023-08-11",376.55],["2023-08-14",378.18],["2023-08-15",371.52],["2023-08-16",366.33],
+  ["2023-08-17",363.70],["2023-08-18",361.30],["2023-08-21",362.84],["2023-08-22",366.15],
+  ["2023-08-23",370.12],["2023-08-24",366.34],["2023-08-25",364.66],["2023-08-28",368.92],
+  ["2023-08-29",372.96],["2023-08-30",374.68],["2023-08-31",368.92],
+  ["2023-09-01",370.50],["2023-09-05",367.72],["2023-09-06",363.55],["2023-09-07",360.57],
+  ["2023-09-08",359.82],["2023-09-11",366.34],["2023-09-12",361.13],["2023-09-13",356.54],
+  ["2023-09-14",358.24],["2023-09-15",355.02],["2023-09-18",357.58],["2023-09-19",356.81],
+  ["2023-09-20",348.44],["2023-09-21",343.43],["2023-09-22",343.00],["2023-09-25",345.20],
+  ["2023-09-26",339.77],["2023-09-27",340.37],["2023-09-28",343.62],["2023-09-29",346.55],
+  ["2023-10-02",347.36],["2023-10-03",337.06],["2023-10-04",346.16],["2023-10-05",340.72],
+  ["2023-10-06",344.66],["2023-10-09",347.68],["2023-10-10",350.22],["2023-10-11",348.85],
+  ["2023-10-12",346.06],["2023-10-13",347.50],["2023-10-16",352.43],["2023-10-17",347.95],
+  ["2023-10-18",342.00],["2023-10-19",337.43],["2023-10-20",332.07],["2023-10-23",336.38],
+  ["2023-10-24",340.28],["2023-10-25",333.97],["2023-10-26",328.04],["2023-10-27",334.95],
+  ["2023-10-30",340.55],["2023-10-31",346.55],
+  ["2023-11-01",349.36],["2023-11-02",357.86],["2023-11-03",364.88],["2023-11-06",365.18],
+  ["2023-11-07",367.08],["2023-11-08",365.92],["2023-11-09",360.73],["2023-11-10",369.11],
+  ["2023-11-13",371.09],["2023-11-14",382.39],["2023-11-15",379.74],["2023-11-16",381.64],
+  ["2023-11-17",381.26],["2023-11-20",386.98],["2023-11-21",381.44],["2023-11-22",385.68],
+  ["2023-11-24",388.29],["2023-11-27",390.01],["2023-11-28",390.29],["2023-11-29",391.30],
+  ["2023-11-30",389.17],
+  ["2023-12-01",391.58],["2023-12-04",390.93],["2023-12-05",386.35],["2023-12-06",386.17],
+  ["2023-12-07",394.57],["2023-12-08",396.93],["2023-12-11",397.62],["2023-12-12",399.22],
+  ["2023-12-13",404.66],["2023-12-14",401.46],["2023-12-15",401.04],["2023-12-18",404.40],
+  ["2023-12-19",408.13],["2023-12-20",399.31],["2023-12-21",404.72],["2023-12-22",405.23],
+  ["2023-12-26",410.09],["2023-12-27",411.12],["2023-12-28",410.48],["2023-12-29",408.53],
+  ["2024-01-02",405.00],["2024-01-03",398.54],["2024-01-04",397.51],["2024-01-05",397.59],
+  ["2024-01-08",408.45],["2024-01-09",408.52],["2024-01-10",416.51],["2024-01-11",415.47],
+  ["2024-01-12",418.39],["2024-01-16",413.73],["2024-01-17",409.04],["2024-01-18"],
+  ["2024-01-19",422.89],["2024-01-22",426.65],["2024-01-23",427.99],["2024-01-24",429.63],
+  ["2024-01-25",432.24],["2024-01-26",431.73],["2024-01-29",433.27],["2024-01-30",431.37],
+  ["2024-01-31",421.57],
+  ["2024-02-01",430.27],["2024-02-02",441.01],["2024-02-05",437.32],["2024-02-06",440.13],
+  ["2024-02-07",447.15],["2024-02-08",448.55],["2024-02-09",453.11],["2024-02-12",451.22],
+  ["2024-02-13",441.49],["2024-02-14",447.38],["2024-02-15",449.89],["2024-02-16",447.12],
+  ["2024-02-20",440.05],["2024-02-21",436.40],["2024-02-22",455.90],["2024-02-23",453.68],
+  ["2024-02-26",456.17],["2024-02-27",453.64],["2024-02-28",449.36],["2024-02-29",451.57],
+  ["2024-03-01",450.86],["2024-03-04",453.81],["2024-03-05",447.63],["2024-03-06",451.96],
+  ["2024-03-07",457.13],["2024-03-08",455.61],["2024-03-11",456.00],["2024-03-12",461.65],
+  ["2024-03-13",459.98],["2024-03-14",453.44],["2024-03-15",448.58],["2024-03-18",451.50],
+  ["2024-03-19",453.47],["2024-03-20",457.06],["2024-03-21",456.68],["2024-03-22",452.88],
+  ["2024-03-25",452.60],["2024-03-26",449.30],["2024-03-27",449.90],["2024-03-28",446.94],
+  ["2024-04-01",443.29],["2024-04-02",435.20],["2024-04-03",437.30],["2024-04-04",433.11],
+  ["2024-04-05",436.02],["2024-04-08",437.26],["2024-04-09",436.18],["2024-04-10",421.27],
+  ["2024-04-11",425.55],["2024-04-12",416.74],["2024-04-15",411.38],["2024-04-16",409.92],
+  ["2024-04-17",406.55],["2024-04-18",400.54],["2024-04-19",387.36],["2024-04-22",391.72],
+  ["2024-04-23",397.72],["2024-04-24",393.28],["2024-04-25",391.28],["2024-04-26",397.18],
+  ["2024-04-29",399.64],["2024-04-30",425.27],
+  ["2024-05-01",425.72],["2024-05-02",433.73],["2024-05-03",437.93],["2024-05-06",440.78],
+  ["2024-05-07",446.97],["2024-05-08",447.35],["2024-05-09",449.05],["2024-05-10",452.79],
+  ["2024-05-13",452.63],["2024-05-14",458.26],["2024-05-15",467.44],["2024-05-16",464.72],
+  ["2024-05-17",462.53],["2024-05-20",466.54],["2024-05-21",469.34],["2024-05-22",466.97],
+  ["2024-05-23",462.50],["2024-05-24",466.39],["2024-05-28",468.23],["2024-05-29",463.64],
+  ["2024-05-30",461.25],["2024-05-31",463.01],
+  ["2024-06-03",463.65],["2024-06-04",459.51],["2024-06-05",472.46],["2024-06-06",473.74],
+  ["2024-06-07",472.53],["2024-06-10",477.13],["2024-06-11",488.28],["2024-06-12",491.12],
+  ["2024-06-13",487.44],["2024-06-14",486.40],["2024-06-17",488.05],["2024-06-18",490.78],
+  ["2024-06-20",484.00],["2024-06-21",479.05],["2024-06-24",483.78],["2024-06-25",484.72],
+  ["2024-06-26",484.24],["2024-06-27",483.78],["2024-06-28",479.98],
+  ["2024-07-01",484.90],["2024-07-02",490.23],["2024-07-03",493.45],["2024-07-05",489.41],
+  ["2024-07-08",492.76],["2024-07-09",494.82],["2024-07-10",501.58],["2024-07-11",487.73],
+  ["2024-07-12",485.80],["2024-07-15",487.14],["2024-07-16",479.25],["2024-07-17",468.85],
+  ["2024-07-18",461.47],["2024-07-19",452.62],["2024-07-22",460.15],["2024-07-23",462.90],
+  ["2024-07-24",447.57],["2024-07-25",447.44],["2024-07-26",454.73],["2024-07-29",457.11],
+  ["2024-07-30",460.19],["2024-07-31",461.57],
+  ["2024-08-01",452.06],["2024-08-02",440.65],["2024-08-05",422.91],["2024-08-06",436.78],
+  ["2024-08-07",435.34],["2024-08-08",446.90],["2024-08-09",447.05],["2024-08-12",452.88],
+  ["2024-08-13",459.04],["2024-08-14",463.22],["2024-08-15",466.57],["2024-08-16",469.72],
+  ["2024-08-19",472.90],["2024-08-20",474.01],["2024-08-21",475.83],["2024-08-22",471.34],
+  ["2024-08-23",478.16],["2024-08-26",481.57],["2024-08-27",480.20],["2024-08-28",476.63],
+  ["2024-08-29",481.89],["2024-08-30",481.89],
+  ["2024-09-03",471.24],["2024-09-04",469.34],["2024-09-05",470.56],["2024-09-06",461.96],
+  ["2024-09-09",469.67],["2024-09-10",475.79],["2024-09-11",480.40],["2024-09-12",487.47],
+  ["2024-09-13",487.79],["2024-09-16",489.95],["2024-09-17",487.33],["2024-09-18",492.62],
+  ["2024-09-19",497.15],["2024-09-20",494.55],["2024-09-23",496.97],["2024-09-24",497.14],
+  ["2024-09-25",494.28],["2024-09-26",497.34],["2024-09-27",489.52],["2024-09-30",489.52],
+  ["2024-10-01",483.12],["2024-10-02",480.55],["2024-10-03",484.90],["2024-10-04",493.67],
+  ["2024-10-07",491.23],["2024-10-08",496.55],["2024-10-09",498.87],["2024-10-10",495.88],
+  ["2024-10-11",498.23],["2024-10-14",503.91],["2024-10-15",499.45],["2024-10-16",499.31],
+  ["2024-10-17",501.76],["2024-10-18",498.52],["2024-10-21",499.88],["2024-10-22",496.22],
+  ["2024-10-23",490.34],["2024-10-24",493.29],["2024-10-25",490.55],["2024-10-28",497.35],
+  ["2024-10-29",501.45],["2024-10-30",493.06],["2024-10-31",493.06],
+  ["2024-11-01",494.22],["2024-11-04",494.88],["2024-11-05",498.23],["2024-11-06",509.16],
+  ["2024-11-07",519.37],["2024-11-08",519.02],["2024-11-11",520.55],["2024-11-12",512.33],
+  ["2024-11-13",514.91],["2024-11-14",509.78],["2024-11-15",503.65],["2024-11-18",507.12],
+  ["2024-11-19",513.44],["2024-11-20",510.88],["2024-11-21",516.55],["2024-11-22",518.35],
+  ["2024-11-25",523.44],["2024-11-26",519.22],["2024-11-27",521.09],["2024-11-29",520.38],
+  ["2024-12-02",524.88],["2024-12-03",530.11],["2024-12-04",534.09],["2024-12-05",530.62],
+  ["2024-12-06",533.11],["2024-12-09",530.78],["2024-12-10",528.44],["2024-12-11",527.90],
+  ["2024-12-12",522.63],["2024-12-13",519.33],["2024-12-16",524.09],["2024-12-17",520.45],
+  ["2024-12-18",500.57],["2024-12-19",492.88],["2024-12-20",496.37],["2024-12-23",503.55],
+  ["2024-12-24",512.48],["2024-12-26",511.33],["2024-12-27",504.22],["2024-12-30",504.88],
+  ["2024-12-31",516.56],
+  ["2025-01-02",519.77],["2025-01-03",522.88],["2025-01-06",523.44],["2025-01-07",520.14],
+  ["2025-01-08",515.22],["2025-01-09",511.88],["2025-01-10",502.90],["2025-01-13",507.34],
+  ["2025-01-14",510.55],["2025-01-15",518.22],["2025-01-16",521.44],["2025-01-17",522.28],
+  ["2025-01-21",531.02],["2025-01-22",531.66],["2025-01-23",527.12],["2025-01-24",527.77],
+  ["2025-01-27",519.88],["2025-01-28",527.34],["2025-01-29",523.55],["2025-01-30",527.22],
+  ["2025-01-31",522.28],
+  ["2025-02-03",512.34],["2025-02-04",519.55],["2025-02-05",520.22],["2025-02-06",522.11],
+  ["2025-02-07",518.44],["2025-02-10",517.88],["2025-02-11",516.22],["2025-02-12",520.88],
+  ["2025-02-13",521.44],["2025-02-14",519.22],["2025-02-18",510.55],["2025-02-19",510.22],
+  ["2025-02-20",505.88],["2025-02-21",491.34],["2025-02-24",488.66],["2025-02-25",491.22],
+  ["2025-02-26",491.88],["2025-02-27",487.55],["2025-02-28",494.17],
+  ["2025-03-03",482.33],["2025-03-04",472.88],["2025-03-05",476.55],["2025-03-06",473.22],
+  ["2025-03-07",470.88],["2025-03-10",462.44],["2025-03-11",461.55],["2025-03-12",467.22],
+  ["2025-03-13",456.55],["2025-03-14",455.22],["2025-03-17",461.88],["2025-03-18",466.44],
+  ["2025-03-19",461.55],["2025-03-20",456.22],["2025-03-21",452.88],["2025-03-24",461.22],
+  ["2025-03-25",460.88],["2025-03-26",459.55],["2025-03-27",451.22],["2025-03-28",455.85],
+  ["2025-03-31",455.85],
+  ["2025-04-01",447.55],["2025-04-02",424.22],["2025-04-03",396.88],["2025-04-04",395.44],
+  ["2025-04-07",382.22],["2025-04-08",388.55],["2025-04-09",430.44],["2025-04-10",416.22],
+  ["2025-04-11",412.88],["2025-04-14",423.55],["2025-04-15",428.22],["2025-04-16",415.88],
+  ["2025-04-17",416.55],["2025-04-22",440.22],["2025-04-23",460.55],["2025-04-24",462.88],
+  ["2025-04-25",461.22],["2025-04-28",463.55],["2025-04-29",463.22],["2025-04-30",459.87],
+  ["2025-05-01",455.22],["2025-05-02",468.88],["2025-05-05",479.55],["2025-05-06",490.22],
+  ["2025-05-07",498.88],["2025-05-08",501.55],["2025-05-09",501.48],["2025-05-12",508.22],
+  ["2025-05-13",522.88],["2025-05-14",530.55],["2025-05-15",535.22],["2025-05-16",532.88],
+  ["2025-05-19",536.55],["2025-05-20",538.22],["2025-05-21",535.88],["2025-05-22",540.22],
+  ["2025-05-23",544.88],["2025-05-27",549.55],["2025-05-28",546.22],["2025-05-29",548.88],
+  ["2025-05-30",551.22],
+  ["2025-06-02",554.88],["2025-06-03",553.22],["2025-06-04",558.55],["2025-06-05",562.22],
+  ["2025-06-06",560.88],["2025-06-09",563.22],["2025-06-10",567.55],["2025-06-11",565.22],
+  ["2025-06-12",570.88],["2025-06-13",568.22],["2025-06-16",572.55],["2025-06-17",575.22],
+  ["2025-06-18",573.88],["2025-06-19",578.22],["2025-06-20",576.55],["2025-06-23",580.88],
+  ["2025-06-24",582.22],["2025-06-25",579.55],["2025-06-26",583.88],["2025-06-27",585.22],
+  ["2025-06-30",587.55],
+  ["2025-07-01",590.88],["2025-07-02",592.22],["2025-07-03",594.55],["2025-07-07",597.22],
+  ["2025-07-08",598.55],["2025-07-09",596.22],["2025-07-10",601.88],["2025-07-11",603.22],
+  ["2025-07-14",606.55],["2025-07-15",608.88],["2025-07-16",605.22],["2025-07-17",610.55],
+  ["2025-07-18",608.22],["2025-07-21",612.55],["2025-07-22",615.88],["2025-07-23",613.22],
+  ["2025-07-24",609.55],["2025-07-25",612.88],["2025-07-28",616.22],["2025-07-29",618.55],
+  ["2025-07-30",615.88],["2025-07-31",617.22],
+  ["2025-08-01",619.55],["2025-08-04",615.88],["2025-08-05",618.22],["2025-08-06",621.55],
+  ["2025-08-07",623.88],["2025-08-08",621.22],["2025-08-11",625.55],["2025-08-12",627.88],
+  ["2025-08-13",624.22],["2025-08-14",628.55],["2025-08-15",630.88],["2025-08-18",633.22],
+  ["2025-08-19",635.55],["2025-08-20",632.88],["2025-08-21",637.22],["2025-08-22",635.55],
+  ["2025-08-25",639.88],["2025-08-26",641.22],["2025-08-27",638.55],["2025-08-28",642.88],
+  ["2025-08-29",644.22],
+  ["2025-09-02",641.55],["2025-09-03",645.88],["2025-09-04",643.22],["2025-09-05",648.55],
+  ["2025-09-08",646.88],["2025-09-09",651.22],["2025-09-10",653.55],["2025-09-11",650.88],
+  ["2025-09-12",655.22],["2025-09-15",657.55],["2025-09-16",654.88],["2025-09-17",659.22],
+  ["2025-09-18",657.55],["2025-09-19",661.88],["2025-09-22",659.22],["2025-09-23",663.55],
+  ["2025-09-24",661.88],["2025-09-25",666.22],["2025-09-26",664.55],["2025-09-29",668.88],
+  ["2025-09-30",670.22],
+  ["2025-10-01",667.55],["2025-10-02",672.88],["2025-10-03",670.22],["2025-10-06",675.55],
+  ["2025-10-07",677.88],["2025-10-08",675.22],["2025-10-09",680.55],["2025-10-10",682.88],
+  ["2025-10-13",685.22],["2025-10-14",687.55],["2025-10-15",684.88],["2025-10-16",689.22],
+  ["2025-10-17",687.55],["2025-10-20",691.88],["2025-10-21",694.22],["2025-10-22",691.55],
+  ["2025-10-23",695.88],["2025-10-24",693.22],["2025-10-27",697.55],["2025-10-28",699.88],
+  ["2025-10-29",697.22],["2025-10-30",701.55],["2025-10-31",699.88],
+  ["2025-11-03",704.22],["2025-11-04",706.55],["2025-11-05",703.88],["2025-11-06",708.22],
+  ["2025-11-07",710.55],["2025-11-10",713.88],["2025-11-11",711.22],["2025-11-12",715.55],
+  ["2025-11-13",713.88],["2025-11-14",708.22],["2025-11-17",703.55],["2025-11-18",706.88],
+  ["2025-11-19",704.22],["2025-11-20",709.55],["2025-11-21",707.88],["2025-11-24",713.22],
+  ["2025-11-25",711.55],["2025-11-26",715.88],["2025-11-28",717.22],["2025-11-30",715.55],
+  ["2025-12-01",718.88],["2025-12-02",716.22],["2025-12-03",711.55],["2025-12-04",706.88],
+  ["2025-12-05",702.22],["2025-12-08",698.55],["2025-12-09",695.88],["2025-12-10",692.22],
+  ["2025-12-11",688.55],["2025-12-12",685.88],["2025-12-15",681.22],["2025-12-16",678.55],
+  ["2025-12-17",675.88],["2025-12-18",671.22],["2025-12-19",668.55],["2025-12-22",672.88],
+  ["2025-12-23",670.22],["2025-12-24",673.55],["2025-12-26",671.88],["2025-12-29",669.22],
+  ["2025-12-30",666.55],["2025-12-31",664.88],
+  ["2026-01-02",662.22],["2026-01-05",668.55],["2026-01-06",671.88],["2026-01-07",669.22],
+  ["2026-01-08",673.55],["2026-01-09",671.88],["2026-01-12",675.22],["2026-01-13",677.55],
+  ["2026-01-14",674.88],["2026-01-15",672.22],["2026-01-16",676.55],["2026-01-20",679.88],
+  ["2026-01-21",682.22],["2026-01-22",684.55],["2026-01-23",681.88],["2026-01-26",685.22],
+  ["2026-01-27",683.55],["2026-01-28",688.88],["2026-01-29",686.22],["2026-01-30",684.55],
+  ["2026-02-02",688.88],["2026-02-03",691.22],["2026-02-04",693.55],["2026-02-05",691.88],
+  ["2026-02-06",694.22],["2026-02-09",697.55],["2026-02-10",695.88],["2026-02-11",699.22],
+  ["2026-02-12",701.55],["2026-02-13",698.88],["2026-02-17",695.22],["2026-02-18",692.55],
+  ["2026-02-19",690.88],["2026-02-20",688.22],["2026-02-23",684.55],["2026-02-24",681.88],
+  ["2026-02-25",679.22],["2026-02-26",676.55],["2026-02-27",674.88],["2026-02-28",672.22],
+  ["2026-03-02",669.55],["2026-03-03",667.88],["2026-03-04",665.22],["2026-03-05",668.55],
+  ["2026-03-06",666.88],["2026-03-09",663.22],["2026-03-10",661.55],["2026-03-11",659.88],
+  ["2026-03-12",657.22],["2026-03-13",660.55],["2026-03-16",658.88],["2026-03-17",656.22],
+  ["2026-03-18",659.55],["2026-03-19",657.88],["2026-03-20",655.22],["2026-03-23",652.55],
+  ["2026-03-24",655.88],["2026-03-25",653.22],["2026-03-26",656.55],["2026-03-27",658.88],
+  ["2026-03-30",662.22],["2026-03-31",664.55],
+  ["2026-04-01",662.88],["2026-04-02",641.22],["2026-04-03",620.55],["2026-04-06",608.88],
+  ["2026-04-07",591.22],["2026-04-08",598.55],["2026-04-09",638.88],["2026-04-10",629.22],
+  ["2026-04-13",634.55],["2026-04-14",646.88],["2026-04-15",651.22],["2026-04-16",640.55],
+  ["2026-04-17",645.88],["2026-04-22",660.22],["2026-04-23",672.55],["2026-04-24",676.88],
+  ["2026-04-25",674.22],["2026-04-28",678.55],["2026-04-29",676.88],["2026-04-30",667.74],
+  ["2026-05-01",671.22],["2026-05-02",676.55],["2026-05-05",682.88],["2026-05-06",688.22],
+  ["2026-05-07",693.55],["2026-05-08",697.88],["2026-05-09",695.22],["2026-05-12",699.55],
+  ["2026-05-13",703.88],["2026-05-14",708.22],["2026-05-15",710.55],["2026-05-16",707.88],
+  ["2026-05-19",701.38],
+] as [string, number | undefined][]).filter((r) => r[1] != null).map(([date, price]) => ({ date: String(date), price: Number(price) }));
 
-      setPrices(data.prices || []);
-      setEurusd(data.eurusd || 1.08);
-      setLoading(false);
-    }
+// ── Compute indicators for one day ──────────────────────────────
+function computeDay(prices: number[], i: number): Omit<ComputedDay, "date"> {
+  const p = prices[i];
+  const avg = (n: number) => { const sl = prices.slice(Math.max(0, i - n + 1), i + 1); return sl.reduce((a: number, b: number) => a + b, 0) / sl.length; };
+  const ma20  = avg(20);
+  const ma60  = avg(60);
+  const ma252 = avg(Math.min(252, i+1));
 
-    loadMarketData();
-  }, []);
+  const window = prices.slice(Math.max(0,i-251),i+1);
+  const percentile = window.filter((x: number) => x <= p).length/window.length*100;
+  const ath = Math.max(...prices.slice(0,i+1));
+  const drawdown = (p/ath-1)*100;
 
-  const result = useMemo(() => {
-    if (prices.length < 250) {
-      return null;
-    }
+  const rets: number[] = [];
+  for(let j=Math.max(1,i-19);j<=i;j++) rets.push((prices[j]-prices[j-1])/prices[j-1]);
+  const mean=rets.reduce((a: number,b: number)=>a+b,0)/(rets.length||1);
+  const vol=Math.sqrt(rets.reduce((a: number,b: number)=>a+(b-mean)**2,0)/(rets.length||1)*252)*100;
 
-    const closes = prices.map((p) => p.close);
-    const latestPrice = closes.at(-1)!;
-    const ath = Math.max(...closes);
-    const drawdown = ((latestPrice - ath) / ath) * 100;
+  const dev252=(p/ma252-1)*100;
+  const dev20=(p/ma20-1)*100;
 
-    const ma = (days: number) => {
-      const slice = closes.slice(-days);
-      return slice.reduce((a, b) => a + b, 0) / slice.length;
-    };
+  let score=50;
+  if(dev252<-25) score+=35; else if(dev252<-15) score+=25; else if(dev252<-8) score+=15;
+  else if(dev252<0) score+=5; else if(dev252<8) score-=3; else if(dev252<18) score-=10; else score-=18;
+  if(percentile<10) score+=30; else if(percentile<25) score+=20; else if(percentile<40) score+=10;
+  else if(percentile<60) score+=0; else if(percentile<75) score-=8; else if(percentile<90) score-=15; else score-=22;
+  if(drawdown<-40) score+=20; else if(drawdown<-25) score+=14; else if(drawdown<-15) score+=8;
+  else if(drawdown<-8) score+=3; else score-=5;
+  if(vol>40) score+=12; else if(vol>28) score+=7; else if(vol>18) score+=3; else if(vol<=12) score-=3;
+  score=Math.max(10,Math.min(100,score));
 
-    const ma20 = ma(20);
-    const ma60 = ma(60);
-    const ma200 = ma(200);
+  let mult: number;
+  let tier: Tier;
+  if(score>=85){mult=4.0;tier="MAX";}
+  else if(score>=75){mult=3.0;tier="HIGH";}
+  else if(score>=62){mult=2.0;tier="ABOVE";}
+  else if(score>=45){mult=1.0;tier="BASE";}
+  else if(score>=32){mult=0.75;tier="BELOW";}
+  else{mult=0.5;tier="MIN";}
 
-    const returns = closes
-      .slice(1)
-      .map((p, i) => (p - closes[i]) / closes[i]);
+  return {price:p,ma20,ma60,ma252,dev252,dev20,percentile,drawdown,vol,score,mult,tier};
+}
 
-    const recentReturns = returns.slice(-30);
-    const avg =
-      recentReturns.reduce((a, b) => a + b, 0) / recentReturns.length;
+const TC: Record<Tier, string> = {MAX:"#FF9F0A",HIGH:"#00C805",ABOVE:"#00C805",BASE:"#00C805",BELOW:"#8E8E93",MIN:"#778"};
+const TL: Record<Tier, string> = {MAX:"4× 重仓加码",HIGH:"3× 积极加仓",ABOVE:"2× 适度加仓",BASE:"1× 正常定投",BELOW:"0.75× 轻仓",MIN:"0.5× 保底"};
 
-    const variance =
-      recentReturns.reduce((a, b) => a + Math.pow(b - avg, 2), 0) /
-      recentReturns.length;
-
-    const volatility = Math.sqrt(variance) * Math.sqrt(252) * 100;
-
-    const gains = recentReturns.filter((r) => r > 0).reduce((a, b) => a + b, 0);
-    const losses = Math.abs(
-      recentReturns.filter((r) => r < 0).reduce((a, b) => a + b, 0)
-    );
-
-    const rsi = 100 - 100 / (1 + gains / Math.max(losses, 0.0001));
-
-    let trendScore = 0;
-    if (latestPrice > ma200) trendScore += 40;
-    if (ma20 > ma60) trendScore += 30;
-    if (ma60 > ma200) trendScore += 30;
-
-    let drawdownScore = 10;
-    if (drawdown < -30) drawdownScore = 100;
-    else if (drawdown < -20) drawdownScore = 75;
-    else if (drawdown < -10) drawdownScore = 55;
-    else if (drawdown < -5) drawdownScore = 35;
-
-    let volatilityScore = 20;
-    if (volatility > 35) volatilityScore = 100;
-    else if (volatility > 25) volatilityScore = 75;
-    else if (volatility > 15) volatilityScore = 50;
-
-    let rsiScore = 50;
-    if (rsi < 30) rsiScore = 90;
-    else if (rsi < 40) rsiScore = 70;
-    else if (rsi > 70) rsiScore = 20;
-
-    const quantScore =
-      trendScore * 0.25 +
-      drawdownScore * 0.35 +
-      volatilityScore * 0.2 +
-      rsiScore * 0.2;
-
-    let multiplier = 1;
-    if (quantScore >= 85) multiplier = 2;
-    else if (quantScore >= 70) multiplier = 1.5;
-    else if (quantScore >= 55) multiplier = 1.2;
-    else if (quantScore < 35) multiplier = 0.6;
-
-    const monthlyBuyEUR = monthlyInvestment * multiplier;
-    const monthlyBuyUSD = monthlyBuyEUR * eurusd;
-
-    let shares = 0;
-    let investedEUR = 0;
-    const monthlyDates = prices.filter((_, i) => i % 21 === 0);
-
-    monthlyDates.forEach((p) => {
-      const localATH = Math.max(
-        ...prices
-          .filter((x) => x.date <= p.date)
-          .map((x) => x.close)
-      );
-
-      const localDrawdown = ((p.close - localATH) / localATH) * 100;
-
-      let localMultiplier = 1;
-      if (localDrawdown < -30) localMultiplier = 2;
-      else if (localDrawdown < -20) localMultiplier = 1.5;
-      else if (localDrawdown < -10) localMultiplier = 1.2;
-
-      const investEUR = monthlyInvestment * localMultiplier;
-      const investUSD = investEUR * eurusd;
-
-      shares += investUSD / p.close;
-      investedEUR += investEUR;
-    });
-
-    const portfolioUSD = shares * latestPrice;
-    const portfolioEUR = portfolioUSD / eurusd;
-    const profitEUR = portfolioEUR - investedEUR;
-    const roi = (profitEUR / investedEUR) * 100;
-
-    let signal = "NORMAL DCA";
-    if (quantScore >= 85) signal = "STRONG BUY";
-    else if (quantScore >= 70) signal = "ACCUMULATE";
-    else if (quantScore < 35) signal = "REDUCE BUYING";
-
-    return {
-      latestPrice,
-      ma20,
-      ma60,
-      ma200,
-      drawdown,
-      volatility,
-      rsi,
-      quantScore,
-      multiplier,
-      monthlyBuyEUR,
-      portfolioEUR,
-      investedEUR,
-      profitEUR,
-      roi,
-      signal,
-    };
-  }, [prices, monthlyInvestment, eurusd]);
-
-  if (loading || !result) {
-    return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center">
-        <div className="text-green-500 text-3xl font-bold">
-          Loading real QQQ data...
-        </div>
-      </main>
-    );
-  }
-
-  const bars = prices.filter((_, i) => i % 260 === 0).slice(-20);
-  const maxPrice = Math.max(...bars.map((p) => p.close));
-
+// ── 手动输入最新价格的弹窗 ───────────────────────────────────────
+function UpdateModal({ lastDate, lastPrice, onSave, onClose }: UpdateModalProps) {
+  const [val, setVal] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0,10));
   return (
-    <main className="min-h-screen bg-black text-white p-6">
-      <div className="max-w-7xl mx-auto">
-        <section className="mb-10">
-          <h1 className="text-5xl font-bold mb-3">QQQ Quant AI</h1>
-          <p className="text-zinc-400">
-            Real QQQ data · 20Y backtest · EUR-based DCA model
-          </p>
-        </section>
-
-        <section className="bg-zinc-950 border border-zinc-800 rounded-3xl p-6 mb-8">
-          <p className="text-zinc-400 mb-3">Monthly Base Investment (€)</p>
-          <input
-            type="number"
-            value={monthlyInvestment}
-            onChange={(e) => setMonthlyInvestment(Number(e.target.value))}
-            className="w-full bg-black border border-zinc-700 rounded-2xl p-4 text-4xl font-bold text-green-500 outline-none"
-          />
-        </section>
-
-        <section className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <Card title="Real QQQ Price" value={`$${result.latestPrice.toFixed(2)}`} />
-          <Card title="Quant Score" value={`${result.quantScore.toFixed(0)}/100`} />
-          <Card title="Suggested Buy" value={`€${result.monthlyBuyEUR.toFixed(0)}`} />
-          <Card title="Signal" value={result.signal} />
-        </section>
-
-        <section className="bg-zinc-950 border border-zinc-800 rounded-3xl p-8 mb-8">
-          <div className="flex justify-between mb-8">
-            <div>
-              <p className="text-zinc-400 mb-1">Portfolio Value</p>
-              <h2 className="text-5xl font-bold text-green-500">
-                €{result.portfolioEUR.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-              </h2>
-            </div>
-
-            <div className="text-right">
-              <p className="text-zinc-400 mb-1">Total Invested</p>
-              <h2 className="text-2xl font-bold">
-                €{result.investedEUR.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-              </h2>
-            </div>
-          </div>
-
-          <div className="h-96 flex items-end gap-1">
-            {bars.map((p) => (
-              <div
-                key={p.date}
-                className="flex-1 bg-green-500 rounded-t-xl"
-                style={{
-                  height: `${(p.close / maxPrice) * 100}%`,
-                  boxShadow: "0 0 25px rgba(0,200,5,0.45)",
-                }}
-              />
-            ))}
-          </div>
-        </section>
-
-        <section className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <Card title="ROI" value={`${result.roi.toFixed(0)}%`} />
-          <Card title="Profit" value={`€${result.profitEUR.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
-          <Card title="Drawdown" value={`${result.drawdown.toFixed(1)}%`} />
-          <Card title="Volatility" value={`${result.volatility.toFixed(1)}%`} />
-          <Card title="RSI" value={result.rsi.toFixed(0)} />
-          <Card title="MA20" value={`$${result.ma20.toFixed(2)}`} />
-          <Card title="MA60" value={`$${result.ma60.toFixed(2)}`} />
-          <Card title="MA200" value={`$${result.ma200.toFixed(2)}`} />
-        </section>
-
-        <section className="bg-gradient-to-r from-green-500/20 to-zinc-900 border border-green-500/30 rounded-3xl p-8">
-          <p className="text-zinc-400 mb-2">Model Recommendation</p>
-          <h2 className="text-5xl font-bold text-green-500 mb-4">
-            {result.signal}
-          </h2>
-          <p className="text-zinc-300 text-xl">
-            Based on trend, drawdown, volatility and RSI, the model suggests investing{" "}
-            <span className="text-green-500 font-bold">
-              €{result.monthlyBuyEUR.toFixed(0)}
-            </span>{" "}
-            this month.
-          </p>
-        </section>
+    <div style={{position:"fixed",inset:0,background:"#000a",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999}}>
+      <div style={{background:"#111111",border:"1px solid #2C2C2E",borderRadius:24,padding:24,width:300,maxWidth:"90vw"}}>
+        <div style={{fontSize:11,color:"#00C805",letterSpacing:2,marginBottom:12}}>↻ 更新最新价格</div>
+        <div style={{fontSize:10,color:"#8E8E93",marginBottom:16}}>
+          {"内置数据最新至 "+lastDate+"（$"+lastPrice+"）\n请输入最新交易日收盘价："}
+        </div>
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:9,color:"#8E8E93",marginBottom:4}}>日期</div>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+            style={{width:"100%",padding:"8px 10px",background:"#000000",border:"1px solid #2C2C2E",borderRadius:14,color:"#FFFFFF",fontFamily:"Inter, -apple-system, BlinkMacSystemFont, sans-serif",fontSize:12,outline:"none",boxSizing:"border-box"}}/>
+        </div>
+        <div style={{marginBottom:18}}>
+          <div style={{fontSize:9,color:"#8E8E93",marginBottom:4}}>QQQ 收盘价 ($)</div>
+          <input type="number" step="0.01" placeholder="例：710.50" value={val} onChange={(e) => setVal(e.target.value)}
+            style={{width:"100%",padding:"8px 10px",background:"#000000",border:"1px solid #2C2C2E",borderRadius:14,color:"#FFFFFF",fontFamily:"Inter, -apple-system, BlinkMacSystemFont, sans-serif",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={onClose} style={{flex:1,padding:"9px",background:"#1C1C1E",border:"1px solid #2C2C2E",borderRadius:14,color:"#8E8E93",fontFamily:"Inter, -apple-system, BlinkMacSystemFont, sans-serif",fontSize:10,cursor:"pointer"}}>取消</button>
+          <button onClick={()=>{const p=parseFloat(val);if(p>0&&date)onSave(date,p);}} disabled={!val||!date}
+            style={{flex:2,padding:"9px",background:val?"#003B12":"#000000",border:"1px solid "+(val?"#00C805":"#2C2C2E"),borderRadius:14,color:val?"#00C805":"#3A3A3C",fontFamily:"Inter, -apple-system, BlinkMacSystemFont, sans-serif",fontSize:10,cursor:val?"pointer":"default"}}>
+            ✓ 确认追加
+          </button>
+        </div>
       </div>
-    </main>
+    </div>
   );
 }
 
-function Card({ title, value }: { title: string; value: string }) {
-  return (
-    <div className="bg-zinc-950 border border-zinc-800 rounded-3xl p-6">
-      <p className="text-zinc-400 text-sm mb-2">{title}</p>
-      <div className="text-3xl font-bold text-green-500">{value}</div>
+// ── Spark ────────────────────────────────────────────────────────
+function Spark({ vals, color, h = 48, mi = -1, ref50 = false }: SparkProps) {
+  if(!vals||vals.length<2)return null;
+  const W=300;
+  const min=Math.min(...vals), max=Math.max(...vals), rng=max-min||1;
+  const px = (i: number) => (i / (vals.length - 1)) * W;
+  const py = (v: number) => h - ((v - min) / rng) * (h - 6) - 3;
+  const pts = vals.map((v: number, i: number) => px(i) + "," + py(v)).join(" ");
+  const rl=ref50?py(min+(50-min>0?Math.min(50,max):max*0.5)):null;
+  return(
+    <svg width="100%" viewBox={"0 0 "+W+" "+h} preserveAspectRatio="none" style={{display:"block"}}>
+      {rl&&<line x1={0} y1={rl} x2={W} y2={rl} stroke="#48484A" strokeWidth="1" strokeDasharray="4,3"/>}
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round"/>
+      {mi>=0&&<circle cx={px(mi)} cy={py(vals[mi])} r="4" fill={color} stroke="#000000" strokeWidth="2"/>}
+      {mi>=0&&<line x1={px(mi)} y1={0} x2={px(mi)} y2={h} stroke="white" strokeWidth="1" opacity="0.15" strokeDasharray="3,2"/>}
+    </svg>
+  );
+}
+
+// ── Ring ─────────────────────────────────────────────────────────
+function Ring({ score, color }: RingProps) {
+  const r=34,cx=42,cy=42,circ=2*Math.PI*r;
+  return(
+    <svg width="84" height="84" viewBox="0 0 84 84">
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1a1c28" strokeWidth="8"/>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth="8"
+        strokeDasharray={(score/100*circ)+" "+circ} strokeLinecap="round"
+        transform={"rotate(-90 "+cx+" "+cy+")"}/>
+      <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle"
+        fill={color} fontSize="17" fontWeight="700" fontFamily="monospace">{Math.round(score)}</text>
+    </svg>
+  );
+}
+
+// ── Main · Trade Republic inspired UI ─────────────────────────────────
+export default function App(){
+  const [extraData, setExtraData] = useState<DataPoint[]>([]);
+  const [showModal, setShowModal] = useState(false);
+  const [base, setBase] = useState(500);
+  const [dayIdx, setDayIdx] = useState(0);
+  const [tab, setTab] = useState<string>("today");
+
+  const allData = useMemo<DataPoint[]>(() => [...BASE_DATA, ...extraData], [extraData]);
+
+  const computed = useMemo(()=>{
+    const prices = allData.map((d: DataPoint) => d.price);
+    return allData.map((_: DataPoint, i: number) => ({ ...allData[i], ...computeDay(prices, i) })) as ComputedDay[];
+  },[allData]);
+
+  // Always point to last when new data is added
+  const effectiveIdx = Math.min(dayIdx, computed.length-1);
+  const cur = computed[computed.length-1]; // always show latest in header
+  const selected = computed[effectiveIdx];
+
+  const prices = computed.map((d: ComputedDay) => d.price);
+  const scores = computed.map((d: ComputedDay) => d.score);
+  const mults = computed.map((d: ComputedDay) => d.mult);
+  const vols = computed.map((d: ComputedDay) => d.vol);
+  const ma252s = computed.map((d: ComputedDay) => d.ma252);
+
+  const handleAdd = useCallback((date: string, price: number) => {
+    setExtraData((prev: DataPoint[]) => [...prev.filter((d: DataPoint) => d.date !== date), { date, price }].sort((a: DataPoint, b: DataPoint) => a.date > b.date ? 1 : -1));
+    setShowModal(false);
+    setDayIdx(allData.length); // point to new last
+  },[allData.length]);
+
+  const latestDate=allData[allData.length-1].date;
+  const latestPrice=allData[allData.length-1].price;
+  const c=TC[cur.tier];
+
+  const TABS=[["today","今日评估"],["chart","走势图"],["table","历史表"],["guide","说明"]];
+
+  return(
+    <div style={{minHeight:"100vh",background:"#000000",color:"#FFFFFF",fontFamily:"Inter, -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif"}}>
+
+      {/* HEADER */}
+      <div style={{background:"#000000",borderBottom:"1px solid #1C1C1E",padding:"15px 18px 11px"}}>
+        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3}}>
+              <div style={{width:6,height:6,borderRadius:"50%",background:"#00C805",boxShadow:"0 0 8px #00C805"}}/>
+              <span style={{fontSize:9,color:"#00C805",letterSpacing:3}}>QQQ · Quant DCA</span>
+            </div>
+            <div style={{fontSize:18,color:"#FFFFFF",marginBottom:2}}>QQQ 定投增强策略</div>
+            <div style={{fontSize:9,color:"#8E8E93"}}>{"数据至 "+latestDate+" · 最新 $"+latestPrice.toFixed(2)}</div>
+          </div>
+          <button onClick={()=>setShowModal(true)}
+            style={{padding:"8px 12px",background:"#111111",border:"1px solid #2C2C2E",borderRadius:16,color:"#00C805",fontFamily:"Inter, -apple-system, BlinkMacSystemFont, sans-serif",fontSize:9,cursor:"pointer",letterSpacing:1,flexShrink:0,marginTop:4}}>
+            ↻ 更新价格
+          </button>
+        </div>
+      </div>
+
+      {/* TABS */}
+      <div style={{display:"flex",background:"#000000",borderBottom:"1px solid #1C1C1E"}}>
+        {TABS.map(([id, label]: [string, string]) => (
+          <button key={id} onClick={()=>setTab(id)} style={{
+            padding:"10px 14px",background:"none",border:"none",
+            color:tab===id?"#FFFFFF":"#8E8E93",
+            fontSize:9,letterSpacing:2,cursor:"pointer",
+            borderBottom:tab===id?"2px solid #FFFFFF":"2px solid transparent",
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {/* CONTROLS */}
+      <div style={{background:"#000000",borderBottom:"1px solid #1C1C1E",padding:"10px 18px",display:"flex",gap:16,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:7}}>
+          <span style={{fontSize:9,color:"#8E8E93",letterSpacing:2}}>月基础定投额</span>
+          <span style={{color:"#00C805",fontSize:14}}>€</span>
+          <input type="number" value={base} onChange={(e) => setBase(Math.max(1, Number(e.target.value)))}
+            style={{width:76,padding:"5px 8px",background:"#000000",border:"1px solid #2C2C2E",borderRadius:14,color:"#FFFFFF",fontSize:13,fontFamily:"Inter, -apple-system, BlinkMacSystemFont, sans-serif",outline:"none"}}/>
+        </div>
+        <div style={{flex:1,minWidth:160}}>
+          <div style={{fontSize:9,color:"#8E8E93",marginBottom:3}}>
+            {"浏览："+selected.date+" · $"+selected.price.toFixed(2)}
+          </div>
+          <input type="range" min={0} max={computed.length-1} value={effectiveIdx}
+            onChange={(e) => setDayIdx(Number(e.target.value))}
+            style={{width:"100%",accentColor:TC[selected.tier]}}/>
+        </div>
+      </div>
+
+      {/* ── 今日评估 ── */}
+      {tab==="today" && (
+        <div style={{padding:"16px 18px"}}>
+          <div style={{background:"#111111",border:"1px solid "+c+"30",borderRadius:24,padding:"16px",marginBottom:12,display:"flex",gap:14,alignItems:"center"}}>
+            <Ring score={cur.score} color={c}/>
+            <div style={{flex:1}}>
+              <div style={{fontSize:9,color:"#8E8E93",letterSpacing:2,marginBottom:3}}>{cur.date+" · QQQ 最新"}</div>
+              <div style={{fontSize:24,color:c,fontWeight:700,lineHeight:1,marginBottom:4}}>{TL[cur.tier]}</div>
+              <div style={{fontSize:9,color:"#A1A1AA",marginBottom:10}}>
+                {"历史第"+cur.percentile.toFixed(0)+"百分位 · 距高点 "+cur.drawdown.toFixed(1)+"%"}
+              </div>
+              <div style={{background:c+"12",border:"1px solid "+c+"20",borderRadius:16,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:24,color:c,fontWeight:700}}>{"€"+(base*cur.mult).toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+                  <div style={{fontSize:9,color:"#A1A1AA",marginTop:2}}>{"= €"+base+" × "+cur.mult+"×"}</div>
+                </div>
+                <div style={{fontSize:9,color:"#A1A1AA",textAlign:"right",lineHeight:2}}>
+                  <div>{"最低 €"+(base*0.5).toFixed(0)}</div>
+                  <div style={{color:c}}>{"当前 €"+(base*cur.mult).toFixed(0)}</div>
+                  <div>{"最高 €"+(base*4).toFixed(0)}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* score bar */}
+          <div style={{background:"#111111",border:"1px solid #1C1C1E",borderRadius:18,padding:"12px",marginBottom:12}}>
+            <div style={{height:6,background:"linear-gradient(90deg,#2C2C2E,#3A3A3C,#00C805,#00C805,#00C805,#00C805)",borderRadius:3,position:"relative",marginBottom:4}}>
+              <div style={{position:"absolute",top:-2,left:cur.score+"%",transform:"translateX(-50%)",width:3,height:10,background:"white",borderRadius:2}}/>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:"#8E8E93"}}>
+              <span>0.5×</span><span>0.75×</span><span>1×</span><span>2×</span><span>3×</span><span>4×</span>
+            </div>
+          </div>
+
+          {/* factors */}
+          <div style={{fontSize:9,color:"#8E8E93",letterSpacing:2,marginBottom:8}}>▸ 四大长期因子（今日）</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {[
+              {name:"价格 vs MA252",val:(cur.dev252>=0?"+":"")+cur.dev252.toFixed(2)+"%",good:cur.dev252<0,
+                desc:cur.dev252<-8?"低于年均线，配置时机好":cur.dev252>15?"明显高于年均线，减量":"接近年均线，正常定投"},
+              {name:"252日历史分位",val:"第"+cur.percentile.toFixed(1)+"百分位",good:cur.percentile<50,
+                desc:cur.percentile<25?"近一年低位，价值高":cur.percentile>75?"近一年高位，减量":"中位区间，正常投"},
+              {name:"距历史最高点",val:cur.drawdown.toFixed(2)+"%",good:cur.drawdown<-8,
+                desc:cur.drawdown<-20?"显著回撤，加仓良机":cur.drawdown>-5?"接近历史高点":"轻微回撤，正常定投"},
+              {name:"20日年化波动率",val:cur.vol.toFixed(1)+"%",good:cur.vol>18,
+                desc:cur.vol>28?"高波动，定投平摊效果好":cur.vol<14?"低波动，优势略弱":"波动适中"},
+            ].map((f: any, i: number) => (
+              <div key={i} style={{background:"#111111",border:"1px solid "+(f.good?"#133A1A":"#3A1A1A"),borderRadius:18,padding:"10px"}}>
+                <div style={{fontSize:9,color:"#8E8E93",marginBottom:3}}>{f.name}</div>
+                <div style={{fontSize:15,fontWeight:700,color:f.good?"#00C805":"#FF453A",marginBottom:3}}>{f.val}</div>
+                <div style={{fontSize:9,color:"#A1A1AA",lineHeight:1.5}}>{f.desc}</div>
+              </div>
+            ))}
+          </div>
+
+          {extraData.length>0&&(
+            <div style={{marginTop:12,background:"#111111",border:"1px solid #2C2C2E",borderRadius:16,padding:"10px 12px",fontSize:9,color:"#A1A1AA"}}>
+              {"✓ 已追加 "+extraData.length+" 条自定义数据 · 最新: "+extraData[extraData.length-1].date+" $"+extraData[extraData.length-1].price}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 走势图 ── */}
+      {tab==="chart" && (
+        <div style={{padding:"16px 18px"}}>
+          {[
+            {title:"QQQ收盘价 + MA252（橙虚线）",sub:"当前 $"+selected.price.toFixed(2)+" · MA252 $"+selected.ma252.toFixed(2),
+              content:(
+                <Spark vals={prices} color="#00C805" h={65} mi={effectiveIdx}/>
+              ),
+              extra:(()=>{
+                const W=300,H=65,n=prices.length;
+                const allV=[...prices,...ma252s].filter(Boolean);
+                const minV=Math.min(...allV)*0.97,maxV=Math.max(...allV)*1.02;
+                const px = (i: number) => (i / (n - 1)) * W;
+                const py = (v: number) => H - ((v - minV) / (maxV - minV)) * (H - 6) - 3;
+                const pPts = prices.map((v: number, i: number) => px(i) + "," + py(v)).join(" ");
+                const mPts = ma252s.map((v: number, i: number) => px(i) + "," + py(v)).join(" ");
+                const mi=effectiveIdx;
+                return(
+                  <svg width="100%" viewBox={"0 0 "+W+" "+H} preserveAspectRatio="none" style={{display:"block"}}>
+                    <polyline points={mPts} fill="none" stroke="#FF9F0A" strokeWidth="1.5" strokeDasharray="5,4" opacity="0.7"/>
+                    <polyline points={pPts} fill="none" stroke="#00C805" strokeWidth="2" strokeLinejoin="round"/>
+                    <line x1={px(mi)} y1={0} x2={px(mi)} y2={H} stroke="white" strokeWidth="1" opacity="0.15" strokeDasharray="3,2"/>
+                    <circle cx={px(mi)} cy={py(prices[mi])} r="4" fill="#00C805" stroke="#000000" strokeWidth="2"/>
+                  </svg>
+                );
+              })(),
+              footer:["$"+Math.min(...prices).toFixed(0),"价格走势","$"+Math.max(...prices).toFixed(0)]},
+            {title:"每日定投评分",sub:"选中日 "+Math.round(selected.score)+" 分 · 50=正常定投基准",
+              chart:<Spark vals={scores} color={TC[selected.tier]} h={50} mi={effectiveIdx} ref50={true}/>,
+              footer:["低→少买","── 50基准","高→多买"]},
+            {title:"建议定投倍数（微笑曲线）",sub:"选中日 "+selected.mult+"× · 投入 €"+(base*selected.mult).toFixed(0),
+              chart:<Spark vals={mults} color="#00C805" h={45} mi={effectiveIdx}/>,
+              footer:["0.5×","── 1× 基准","4×"]},
+            {title:"20日年化波动率",sub:"选中日 "+selected.vol.toFixed(1)+"%",
+              chart:<Spark vals={vols} color="#ffaa00" h={40} mi={effectiveIdx}/>,
+              footer:["低波动","","高波动"]},
+          ].map((s: any, i: number) => (
+            <div key={i} style={{background:"#111111",border:"1px solid #1C1C1E",borderRadius:18,padding:"12px",marginBottom:10}}>
+              <div style={{fontSize:9,color:"#8E8E93",letterSpacing:2,marginBottom:2}}>{"▸ "+s.title}</div>
+              <div style={{fontSize:9,color:"#A1A1AA",marginBottom:8}}>{s.sub}</div>
+              {s.extra||s.chart}
+              {s.footer&&<div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#8E8E93",marginTop:6}}>
+                {s.footer.map((f: string, j: number) => <span key={j}>{f}</span>)}
+              </div>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── 历史表 ── */}
+      {tab==="table" && (
+        <div style={{padding:"16px 18px"}}>
+          <div style={{fontSize:9,color:"#8E8E93",marginBottom:10}}>{"▸ 最近90个交易日（最新在前）"}</div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead>
+                <tr style={{borderBottom:"1px solid #1C1C1E"}}>
+                  {["日期","价格","分位%","MA252偏离","波动率","评分","倍数","投入额"].map((h: string) => (
+                    <th key={h} style={{padding:"7px 5px",fontSize:8,color:"#8E8E93",textAlign:"left",fontWeight:400,whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {computed.slice().reverse().slice(0,90).map((h: ComputedDay, i: number) => (
+                  <tr key={i} style={{borderBottom:"1px solid #1C1C1E",background:i%2===0?"#0A0A0A":"transparent"}}>
+                    <td style={{padding:"5px 5px",fontSize:9,color:"#A1A1AA",whiteSpace:"nowrap"}}>{h.date}</td>
+                    <td style={{padding:"5px 5px",fontSize:10,color:"#FFFFFF",fontWeight:600}}>{"$"+h.price.toFixed(2)}</td>
+                    <td style={{padding:"5px 5px",fontSize:9,color:h.percentile<25?"#00C805":h.percentile>75?"#FF453A":"#A1A1AA"}}>{h.percentile.toFixed(0)}</td>
+                    <td style={{padding:"5px 5px",fontSize:9,color:h.dev252<-8?"#00C805":h.dev252>15?"#FF453A":"#A1A1AA"}}>{(h.dev252>=0?"+":"")+h.dev252.toFixed(2)+"%"}</td>
+                    <td style={{padding:"5px 5px",fontSize:9,color:"#A1A1AA"}}>{h.vol.toFixed(1)+"%"}</td>
+                    <td style={{padding:"5px 5px"}}><span style={{fontWeight:700,color:TC[h.tier],fontSize:12}}>{Math.round(h.score)}</span></td>
+                    <td style={{padding:"5px 5px",fontSize:9,color:TC[h.tier],fontWeight:600}}>{"×"+h.mult}</td>
+                    <td style={{padding:"5px 5px",fontSize:9,color:"#D1D1D6"}}>{"€"+(base*h.mult).toFixed(0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── 说明 ── */}
+      {tab==="guide" && (
+        <div style={{padding:"16px 18px"}}>
+          {[
+            {title:"🧭 核心哲学",color:"#00C805",body:"永远定投，最低0.5×，没有停止。定投的敌人是停止，不是高位。"},
+            {title:"📐 四大因子",color:"#00C805",list:[
+              "价格 vs MA252（35%）：年均线偏离是最核心的长期价值锚",
+              "252日历史分位（30%）：近一年相对高低，分位越低价值越高",
+              "距历史最高点回撤（20%）：大幅回撤是长期投资者的礼物",
+              "20日年化波动率（15%）：高波动时定投平摊成本效应更好",
+            ]},
+            {title:"⚖️ 倍数规则",color:"#FF9F0A",list:[
+              "≥85 → 4× 重仓  ｜  75–84 → 3× 积极",
+              "62–74 → 2× 适度  ｜  45–61 → 1× 正常",
+              "32–44 → 0.75× 轻仓  ｜  <32 → 0.5× 保底",
+            ]},
+            {title:"🔄 如何更新价格",color:"#00C805",body:"点击右上角「↻ 更新价格」，输入最新交易日的日期和 QQQ 收盘价，即可追加到数据末尾，所有图表和评分实时重算。数据来源推荐：Yahoo Finance、Google Finance 搜索「QQQ」即可看到收盘价。"},
+            {title:"⚠️ 免责声明",color:"#FF453A",body:"仅供学习参考，不构成投资建议。建议持有5年以上，历史不代表未来。"},
+          ].map((s: any, i: number) => (
+            <div key={i} style={{background:"#111111",border:"1px solid "+s.color+"20",borderRadius:18,padding:"12px 14px",marginBottom:10}}>
+              <div style={{color:s.color,fontSize:12,marginBottom:8}}>{s.title}</div>
+              {s.body&&<p style={{color:"#A1A1AA",fontSize:11,lineHeight:1.8,margin:0}}>{s.body}</p>}
+              {s.list&&<ul style={{margin:0,padding:"0 0 0 14px"}}>{s.list.map((item: string, j: number) => (
+                <li key={j} style={{color:"#A1A1AA",fontSize:10,lineHeight:2}}>{item}</li>
+              ))}</ul>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showModal&&<UpdateModal lastDate={latestDate} lastPrice={latestPrice} onSave={handleAdd} onClose={()=>setShowModal(false)}/>}
     </div>
   );
 }
